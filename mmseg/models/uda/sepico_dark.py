@@ -29,11 +29,16 @@ from mmseg.core import add_prefix
 from mmseg.models import UDA, build_segmentor
 from mmseg.models.uda.uda_decorator import UDADecorator, get_module
 from mmseg.models.utils.dacs_transforms import (denorm, get_class_masks, get_mean_std, strong_transform)
+
 from mmseg.models.utils.visualization import subplotimg
 from mmseg.models.utils.ours_transforms import RandomCrop, RandomCropNoProd
 
 from mmseg.models.utils.proto_estimator import ProtoEstimator
 from mmseg.models.losses.contrastive_loss import contrast_preparations
+
+from mmseg.ops import resize
+from mmseg.models.utils.mic_mask import BlockMaskGenerator
+from mmseg.models.utils.snr_mask import SNRMaskGenerator
 
 
 def _params_equal(ema_model, model):
@@ -142,6 +147,13 @@ class SePiCoDark(UDADecorator):
         # ema model
         ema_cfg = deepcopy(cfg['model'])
         self.ema_model = build_segmentor(ema_cfg)
+
+        # mask config
+        self.use_mic_mask = True
+        self.mic_mask = BlockMaskGenerator(0.8, 16)
+        # mode = None or 'block'
+        self.use_snr_mask = False
+        self.snr_mask = SNRMaskGenerator(0.3, 4, mode='snr_mask')
 
     def get_ema_model(self):
         return get_module(self.ema_model)
@@ -422,6 +434,19 @@ class SePiCoDark(UDADecorator):
         source_loss, source_log_vars = self._parse_losses(source_losses)
         log_vars.update(add_prefix(source_log_vars, 'src'))
         source_loss.backward()
+
+        # mic mask
+        if self.use_mic_mask is True:
+            mask_target_img = self.mic_mask.mask_image(target_img)
+        elif self.use_snr_mask is True:
+            mask_target_img = self.snr_mask.mask_image(target_img)
+
+        mask_losses = self.get_model().forward_train(mask_target_img, target_img_metas, pseudo_label, pseudo_weight,
+                                                    return_feat=False, mode='dec')
+        mask_loss, mask_log_vars = self._parse_losses(mask_losses)
+        log_vars.update(add_prefix(mask_log_vars, 'mix'))
+        mask_loss.backward()
+
 
         if self.local_iter >= self.start_distribution_iter:
             # target cl

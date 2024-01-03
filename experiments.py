@@ -464,7 +464,8 @@ def generate_experiment_cfgs(id):
         # general
         uda = 'sepico_dark'
         plcrop = False  # not needed for Dark Zurich
-        iters = 60000
+        # iters = 60000
+        iters = 3000
         pseudo_random_crop = True
         regen_pseudo = True
         # aux
